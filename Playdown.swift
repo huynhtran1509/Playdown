@@ -13,28 +13,25 @@ class StreamReader  {
     let encoding : String.Encoding
     let chunkSize : Int
     
-    var fileHandle : FileHandle!
-    let buffer : NSMutableData!
-    let delimData : Data!
+    var fileHandle : FileHandle
+    let buffer : NSMutableData
+    let delimData : Data
     var atEof : Bool = false
 
     init?(path: String, delimiter: String = "\n", encoding : String.Encoding = .utf8, chunkSize : Int = 4096) {
         self.chunkSize = chunkSize
         self.encoding = encoding
         
-        if let fileHandle = FileHandle(forReadingAtPath: path),
+        guard let fileHandle = FileHandle(forReadingAtPath: path),
             let delimData = delimiter.data(using: String.Encoding.utf8),
-            let buffer = NSMutableData(capacity: chunkSize)
-        {
-            self.fileHandle = fileHandle
-            self.delimData = delimData
-            self.buffer = buffer
-        } else {
-            self.fileHandle = nil
-            self.delimData = nil
-            self.buffer = nil
-            return nil
+            let buffer = NSMutableData(capacity: chunkSize) else {
+                return nil
         }
+        
+        self.fileHandle = fileHandle
+        self.delimData = delimData
+        self.buffer = buffer
+        
     }
     
     deinit {
@@ -43,7 +40,7 @@ class StreamReader  {
     
     /// Return next line, or nil on EOF.
     func nextLine() -> String? {
-        precondition(fileHandle != nil, "Attempt to read from closed file")
+        //precondition(fileHandle != nil, "Attempt to read from closed file")
         
         if atEof {
             return nil
@@ -88,8 +85,7 @@ class StreamReader  {
     
     /// Close the underlying file. No reading must be done after calling this method.
     func close() -> Void {
-        fileHandle?.closeFile()
-        fileHandle = nil
+        fileHandle.closeFile()
     }
 }
 
@@ -97,6 +93,134 @@ extension StreamReader : Sequence {
     func makeIterator() -> AnyIterator<String> {
         return AnyIterator{
             return self.nextLine()
+        }
+    }
+}
+
+//MARK: XMLParser
+class XML:XMLNode {
+    
+    var parser:XMLParser
+    
+    init(data: Data) {
+        self.parser = XMLParser(data: data)
+        super.init()
+        parser.delegate = self
+        parser.parse()
+    }
+    
+    init?(contentsOf url: URL) {
+        guard let parser = XMLParser(contentsOf: url) else { return nil}
+        self.parser = parser
+        super.init()
+        parser.delegate = self
+        parser.parse()
+    }
+}
+
+class XMLNode:NSObject {
+    
+    var name:String?
+    var attributes:[String:String] = [:]
+    var text = ""
+    var children:[XMLNode] = []
+    var parent:XMLNode?
+    
+    override init() {
+        
+    }
+    
+    init(name:String) {
+        self.name = name
+    }
+    
+    init(name:String,value:String) {
+        self.name = name
+        self.text = value
+    }
+    
+    func indexIsValid(index: Int) -> Bool {
+        return (index >= 0 && index <= children.count)
+    }
+    
+    subscript(index: Int) -> XMLNode {
+        get {
+            assert(indexIsValid(index: index), "Index out of range")
+            return children[index]
+        }
+        set {
+            assert(indexIsValid(index: index), "Index out of range")
+            children[index] = newValue
+            newValue.parent = self
+        }
+    }
+    
+    subscript(index: String) -> XMLNode? {
+        get {
+            return children.filter({ $0.name == index }).first
+        }
+        set {
+            guard let newNode = newValue,
+                let filteredChild = children.filter({ $0.name == index }).first
+                else {return}
+            filteredChild.attributes = newNode.attributes
+            filteredChild.text = newNode.text
+            filteredChild.children = newNode.children
+        }
+    }
+    
+    func addChild(_ node:XMLNode) {
+        children.append(node)
+        node.parent = self
+    }
+    
+    func addChild(name:String,value:String) {
+        addChild(XMLNode(name: name, value: value))
+    }
+    
+    func removeChild(at index:Int) {
+        children.remove(at: index)
+    }
+    
+    override var description:String {
+        if let name = name {
+            return "<\(name)\(attributesDescription)>\(text)\(childrenDescription)</\(name)>"
+        } else if let first = children.first {
+            return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\(first.description)"
+        } else {
+            return ""
+        }
+    }
+    
+    var attributesDescription:String {
+        return attributes.map({" \($0)=\"\($1)\" "}).joined()
+    }
+    
+    var childrenDescription:String {
+        return children.map({ $0.description }).joined()
+    }
+    
+}
+
+extension XMLNode:XMLParserDelegate {
+    
+    public func parser(_ parser: XMLParser, foundCharacters string: String) {
+        text += string.trimmingCharacters(in: NSCharacterSet.whitespacesAndNewlines)
+    }
+    
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
+        let childNode = XMLNode()
+        childNode.name = elementName
+        childNode.parent = self
+        childNode.attributes = attributeDict
+        parser.delegate = childNode
+        
+        children.append(childNode)
+    }
+    
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        if let parent = parent {
+            parser.delegate = parent
         }
     }
 }
@@ -139,7 +263,8 @@ extension String {
 }
 
 struct Playdown {
-    let streamReader: StreamReader!
+    
+    var streamReaders: [(reader: StreamReader, name: String)] = []
     let SingleLineTextBeginningPattern = "^//:"
     let MultilineTextBeginningPattern = "/\\*:"
     let MultilineTextEndingPattern = "\\*/"
@@ -151,16 +276,55 @@ struct Playdown {
     }
     
     init(filename: String) {
-        streamReader = StreamReader(path: filename)
+        
+        let fileManager = FileManager.default
+        let path = "file://" + fileManager.currentDirectoryPath + "/" + filename + "/contents.xcplayground"
+        
+        if let urlOf = URL(string: path) {
+            
+            if let xmlFile = XML(contentsOf: urlOf) {
+                    
+                for page in xmlFile[0][0].children {
+                    
+                    if let pageName = page.attributes["name"] {
+                            
+                        if let streamReader = StreamReader(path: "\(filename)/Pages/\(pageName).xcplaygroundpage/Contents.swift") {
+                    
+                            streamReaders.append((reader: streamReader, name: pageName))
+                
+                        }
+                    }
+                }
+            }
+        }
     }
     
     func markdown() throws {
+        
+        let markdownStreamReader = {
+            
+            (streamReader: (reader: StreamReader, name: String)) -> () in
+            
+            do {
+                try self.markdown(streamReader: streamReader)
+            } catch {
+                print(error)
+            }
+        }
+        
+        streamReaders.forEach(markdownStreamReader)
+        
+    }
+    
+    
+    func markdown(streamReader: (reader: StreamReader, name: String)) throws {
         var lineState: LineType = .swiftCode
         var previousLineState: LineType? = nil
-        
         let options = NSRegularExpression.Options.allowCommentsAndWhitespace
+        var fileText: String = ""
         
-        for line in streamReader {
+        for line in streamReader.reader {
+            
             let singleLineBeginning = try line.matchesPattern(SingleLineTextBeginningPattern, options: options)
             let multiLineBeginning = try line.matchesPattern(MultilineTextBeginningPattern, options: options)
             let multiLineEnding = try line.matchesPattern(MultilineTextEndingPattern, options: options)
@@ -176,7 +340,7 @@ struct Playdown {
                 lineState = .swiftCode
             }
             
-            let outputText: String!
+            var outputText: String = ""
             
             if previousLineState == nil {
                 // This is the first line
@@ -228,7 +392,7 @@ struct Playdown {
                 
             }
             
-            print(outputText)
+            fileText += "\n\(outputText)"
             
             previousLineState = lineState
             
@@ -242,9 +406,19 @@ struct Playdown {
             }
         }
         
+        let nameText = "\(streamReader.name).markdown"
+        let fileManager = FileManager.default
+        let path = fileManager.currentDirectoryPath + "/\(nameText)"
+        
         // Handle the closing tags
         if lineState == .swiftCode && previousLineState == .swiftCode {
-            print(MarkdownCodeEndDelimiter)
+            fileText += "\n\(MarkdownCodeEndDelimiter)"
+        }
+        
+        do {
+            try fileText.write(toFile: path, atomically: true, encoding: String.Encoding.utf8)
+        } catch {
+            print(error)
         }
     }
     
