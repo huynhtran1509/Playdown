@@ -97,134 +97,6 @@ extension StreamReader : Sequence {
     }
 }
 
-//MARK: XMLParser
-class XML:XMLNode {
-    
-    var parser:XMLParser
-    
-    init(data: Data) {
-        self.parser = XMLParser(data: data)
-        super.init()
-        parser.delegate = self
-        parser.parse()
-    }
-    
-    init?(contentsOf url: URL) {
-        guard let parser = XMLParser(contentsOf: url) else { return nil}
-        self.parser = parser
-        super.init()
-        parser.delegate = self
-        parser.parse()
-    }
-}
-
-class XMLNode:NSObject {
-    
-    var name:String?
-    var attributes:[String:String] = [:]
-    var text = ""
-    var children:[XMLNode] = []
-    var parent:XMLNode?
-    
-    override init() {
-        
-    }
-    
-    init(name:String) {
-        self.name = name
-    }
-    
-    init(name:String,value:String) {
-        self.name = name
-        self.text = value
-    }
-    
-    func indexIsValid(index: Int) -> Bool {
-        return (index >= 0 && index <= children.count)
-    }
-    
-    subscript(index: Int) -> XMLNode {
-        get {
-            assert(indexIsValid(index: index), "Index out of range")
-            return children[index]
-        }
-        set {
-            assert(indexIsValid(index: index), "Index out of range")
-            children[index] = newValue
-            newValue.parent = self
-        }
-    }
-    
-    subscript(index: String) -> XMLNode? {
-        get {
-            return children.filter({ $0.name == index }).first
-        }
-        set {
-            guard let newNode = newValue,
-                let filteredChild = children.filter({ $0.name == index }).first
-                else {return}
-            filteredChild.attributes = newNode.attributes
-            filteredChild.text = newNode.text
-            filteredChild.children = newNode.children
-        }
-    }
-    
-    func addChild(_ node:XMLNode) {
-        children.append(node)
-        node.parent = self
-    }
-    
-    func addChild(name:String,value:String) {
-        addChild(XMLNode(name: name, value: value))
-    }
-    
-    func removeChild(at index:Int) {
-        children.remove(at: index)
-    }
-    
-    override var description:String {
-        if let name = name {
-            return "<\(name)\(attributesDescription)>\(text)\(childrenDescription)</\(name)>"
-        } else if let first = children.first {
-            return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\(first.description)"
-        } else {
-            return ""
-        }
-    }
-    
-    var attributesDescription:String {
-        return attributes.map({" \($0)=\"\($1)\" "}).joined()
-    }
-    
-    var childrenDescription:String {
-        return children.map({ $0.description }).joined()
-    }
-    
-}
-
-extension XMLNode:XMLParserDelegate {
-    
-    public func parser(_ parser: XMLParser, foundCharacters string: String) {
-        text += string.trimmingCharacters(in: NSCharacterSet.whitespacesAndNewlines)
-    }
-    
-    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
-        let childNode = XMLNode()
-        childNode.name = elementName
-        childNode.parent = self
-        childNode.attributes = attributeDict
-        parser.delegate = childNode
-        
-        children.append(childNode)
-    }
-    
-    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
-        if let parent = parent {
-            parser.delegate = parent
-        }
-    }
-}
-
 extension String {
     func substringsMatchingPattern(_ pattern: String, options: NSRegularExpression.Options, matchGroup: Int) throws -> [String] {
         let range = NSMakeRange(0, (self as NSString).length)
@@ -260,6 +132,14 @@ extension String {
         let matches = regex.matches(in: self, options: [], range: range)
         return matches.map { return $0.rangeAt(0) }
     }
+    
+   func strip(from char:Character) -> String {
+        let c = self.characters
+        if let ix = c.index(of: char) {
+            return String(c.prefix(upTo: ix))
+        }
+        return ""
+    }
 }
 
 struct Playdown {
@@ -278,32 +158,36 @@ struct Playdown {
     init(filename: String) {
         
         let fileManager = FileManager.default
-        let path = "file://" + fileManager.currentDirectoryPath + "/" + filename + "/contents.xcplayground"
+        let path =  fileManager.currentDirectoryPath + "/" + filename + "/Pages/"
         
-        if let urlOf = URL(string: path) {
+        if let pathUrl = URL(string: path) {
             
-            if let xmlFile = XML(contentsOf: urlOf) {
+            do {
+                
+                let directoryContents = try FileManager.default.contentsOfDirectory(at: pathUrl, includingPropertiesForKeys: nil, options: [])
+                
+                for element in directoryContents {
                     
-                for page in xmlFile[0][0].children {
-                    
-                    if let pageName = page.attributes["name"] {
-                            
+                    if let pageName = element.pathComponents.last?.strip(from: ".") {
+                        
                         if let streamReader = StreamReader(path: "\(filename)/Pages/\(pageName).xcplaygroundpage/Contents.swift") {
-                    
+                
                             streamReaders.append((reader: streamReader, name: pageName))
                 
                         }
                     }
                 }
+                
+            } catch {
+                print(error)
             }
         }
+        
     }
     
     func markdown() throws {
         
-        let markdownStreamReader = {
-            
-            (streamReader: (reader: StreamReader, name: String)) -> () in
+        for streamReader in streamReaders {
             
             do {
                 try self.markdown(streamReader: streamReader)
@@ -312,10 +196,7 @@ struct Playdown {
             }
         }
         
-        streamReaders.forEach(markdownStreamReader)
-        
     }
-    
     
     func markdown(streamReader: (reader: StreamReader, name: String)) throws {
         var lineState: LineType = .swiftCode
@@ -406,9 +287,10 @@ struct Playdown {
             }
         }
         
-        let nameText = "\(streamReader.name).markdown"
+        
+        let markdownName = "/\(streamReader.name).markdown"
         let fileManager = FileManager.default
-        let path = fileManager.currentDirectoryPath + "/\(nameText)"
+        let path = fileManager.currentDirectoryPath + markdownName
         
         // Handle the closing tags
         if lineState == .swiftCode && previousLineState == .swiftCode {
