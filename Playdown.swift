@@ -40,7 +40,6 @@ class StreamReader  {
     
     /// Return next line, or nil on EOF.
     func nextLine() -> String? {
-        //precondition(fileHandle != nil, "Attempt to read from closed file")
         
         if atEof {
             return nil
@@ -145,6 +144,7 @@ extension String {
 struct Playdown {
     
     var streamReaders: [(reader: StreamReader, name: String)] = []
+    var playgroundDirectory = ""
     let SingleLineTextBeginningPattern = "^//:"
     let MultilineTextBeginningPattern = "/\\*:"
     let MultilineTextEndingPattern = "\\*/"
@@ -159,6 +159,8 @@ struct Playdown {
         
         let fileManager = FileManager.default
         let path =  fileManager.currentDirectoryPath + "/" + filename + "/Pages/"
+        let playgroundPath = filename.strip(from: ".")
+        playgroundDirectory =  playgroundPath.strip(from: "/")
         
         if let pathUrl = URL(string: path) {
             
@@ -179,7 +181,14 @@ struct Playdown {
                 }
                 
             } catch {
-                print(error)
+                
+                let playgroundName = playgroundPath.replacingOccurrences(of: playgroundDirectory + "/", with: "")
+                
+                if let streamReader = StreamReader(path: "\(filename)/Contents.swift") {
+                    
+                    streamReaders.append((reader: streamReader, name: playgroundName))
+                    
+                }
             }
         }
         
@@ -290,7 +299,7 @@ struct Playdown {
         
         let markdownName = "/\(streamReader.name).markdown"
         let fileManager = FileManager.default
-        let path = fileManager.currentDirectoryPath + markdownName
+        let path = fileManager.currentDirectoryPath + "/" + playgroundDirectory + "/" + markdownName
         
         // Handle the closing tags
         if lineState == .swiftCode && previousLineState == .swiftCode {
