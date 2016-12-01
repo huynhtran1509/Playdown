@@ -182,16 +182,24 @@ struct Playdown {
                 
             } catch {
                 
+                //Handle case for single playground page or single swift file
+                var streamPath = filename
                 let playgroundName = playgroundPath.replacingOccurrences(of: playgroundDirectory + "/", with: "")
                 
-                if let streamReader = StreamReader(path: "\(filename)/Contents.swift") {
+                if let playPathURL = URL(string: filename) {
+                    
+                    if !(playPathURL.pathExtension == "swift"){
+                        
+                        streamPath += "/Contents.swift"
+                    }
+                }
+                
+                if let streamReader = StreamReader(path: streamPath) {
                     
                     streamReaders.append((reader: streamReader, name: playgroundName))
-                    
                 }
             }
         }
-        
     }
     
     func markdown() throws {
