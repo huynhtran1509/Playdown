@@ -164,41 +164,44 @@ struct Playdown {
         
         if let pathUrl = URL(string: path) {
             
-            do {
-                
-                let directoryContents = try FileManager.default.contentsOfDirectory(at: pathUrl, includingPropertiesForKeys: nil, options: [])
-                
-                for element in directoryContents {
+            if fileManager.fileExists(atPath: path) {
+                do {
                     
-                    if let pageName = element.pathComponents.last?.strip(from: ".") {
+                    let directoryContents = try fileManager.contentsOfDirectory(at: pathUrl, includingPropertiesForKeys: nil, options: [])
+                    
+                    for element in directoryContents {
                         
-                        if let streamReader = StreamReader(path: "\(filename)/Pages/\(pageName).xcplaygroundpage/Contents.swift") {
-                
-                            streamReaders.append((reader: streamReader, name: pageName))
-                
+                        if let pageName = element.pathComponents.last?.strip(from: ".") {
+                            
+                            if let streamReader = StreamReader(path: "\(filename)/Pages/\(pageName).xcplaygroundpage/Contents.swift") {
+                                
+                                streamReaders.append((reader: streamReader, name: pageName))
+                            }
                         }
                     }
+                    
+                } catch {
+                    print(error)
                 }
-                
-            } catch {
+            }
+            else {
                 
                 //Handle case for single playground page or single swift file
                 var streamPath = filename
                 let playgroundName = playgroundPath.replacingOccurrences(of: playgroundDirectory + "/", with: "")
                 
-                if let playPathURL = URL(string: filename) {
+                if let playPathURL = URL(string: filename), playPathURL.pathExtension != "swift" {
                     
-                    if !(playPathURL.pathExtension == "swift"){
-                        
-                        streamPath += "/Contents.swift"
-                    }
+                    streamPath += "/Contents.swift"
                 }
                 
                 if let streamReader = StreamReader(path: streamPath) {
                     
                     streamReaders.append((reader: streamReader, name: playgroundName))
                 }
+                
             }
+            
         }
     }
     
@@ -304,15 +307,14 @@ struct Playdown {
             }
         }
         
-        
-        let markdownName = "/\(streamReader.name).markdown"
-        let fileManager = FileManager.default
-        let path = fileManager.currentDirectoryPath + "/" + playgroundDirectory + "/" + markdownName
-        
         // Handle the closing tags
         if lineState == .swiftCode && previousLineState == .swiftCode {
             fileText += "\n\(MarkdownCodeEndDelimiter)"
         }
+        
+        let markdownName = "/\(streamReader.name).markdown"
+        let fileManager = FileManager.default
+        let path = fileManager.currentDirectoryPath + "/" + playgroundDirectory + "/" + markdownName
         
         do {
             try fileText.write(toFile: path, atomically: true, encoding: String.Encoding.utf8)
