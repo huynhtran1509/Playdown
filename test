@@ -1,11 +1,11 @@
-INPUT=$(ls Tests/*.playground)
-tmp="Tests/tmp.out"
+INPUT=$(ls Tests/*.swift)
 
 for file in $INPUT
 do
-  swift Playdown.swift "$file" > "$tmp"
-  fn="Tests/"$(basename "$file")".expected"
-  diff -Bwu "$tmp" "$fn"
+  swift Playdown.swift "$file"
+  fn=Tests/"$(basename "$file")".expected
+  markdown=Tests/$(basename "$file" .swift).markdown
+  diff -Bwu $markdown "$fn"
 
   if [ $? -ne 0 ]
   then
@@ -19,4 +19,6 @@ do
   else
     echo "$file - passed"
   fi
+
+  rm $markdown
 done
