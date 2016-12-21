@@ -1,3 +1,5 @@
+
+# Runs tests for single swift files
 INPUT=$(ls Tests/*.swift)
 
 for file in $INPUT
@@ -14,11 +16,49 @@ do
     echo "Output"
     echo "======"
     echo
-    swift Playdown.swift "$file"
+    cat $markdown
     echo
   else
     echo "$file - passed"
   fi
-
-  rm $markdown
 done
+
+# Runs tests for playground file with single page
+swift Playdown.swift Tests/NoPagesTest.playground
+diff -Bwu Tests/NoPagesTest.playground.expected Tests/NoPagesTest.markdown
+
+if [ $? -ne 0 ]
+then
+  echo "$file - failed"
+  echo
+  echo "Output"
+  echo "======"
+  echo
+  cat Tests/NoPagesTest.markdown
+  echo
+else
+  echo "NoPagesTest.playground - passed"
+fi
+
+# Runs tests for playground file with single page
+swift Playdown.swift Tests/PlaydownTest.playground
+diff -Bwu Tests/PlaydownTest.TestPage1.expected Tests/TestPage1.markdown
+FIRST_FILE_RESPONSE=$?
+diff -Bwu Tests/PlaydownTest.TestPage1.expected Tests/TestPage1.markdown
+SECOND_FILE_RESPONSE=$?
+
+if [ $FIRST_FILE_RESPONSE -ne 0 ] || [ $SECOND_FILE_RESPONSE -ne 0 ]
+then
+  echo "PlaydownTest.playground - failed"
+  echo
+  echo "Output"
+  echo "======"
+  echo
+  cat Tests/TestPage1.markdown
+  cat Tests/TestPage2.markdown
+  echo
+else
+  echo "PlaydownTest.playground - passed"
+fi
+
+rm Tests/*.mark
