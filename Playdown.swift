@@ -9,137 +9,142 @@ import Foundation
 *  http://stackoverflow.com/questions/29540593/read-a-file-line-by-line-in-swift-1-2
 */
 class StreamReader  {
-    
-    let encoding : UInt
+
+    let encoding : String.Encoding
     let chunkSize : Int
-    
-    var fileHandle : NSFileHandle!
-    let buffer : NSMutableData!
-    let delimData : NSData!
+
+    var fileHandle : FileHandle
+    let buffer : NSMutableData
+    let delimData : Data
     var atEof : Bool = false
-    
-    init?(path: String, delimiter: String = "\n", encoding : UInt = NSUTF8StringEncoding, chunkSize : Int = 4096) {
+
+    init?(path: String, delimiter: String = "\n", encoding : String.Encoding = .utf8, chunkSize : Int = 4096) {
         self.chunkSize = chunkSize
         self.encoding = encoding
-        
-        if let fileHandle = NSFileHandle(forReadingAtPath: path),
-            delimData = delimiter.dataUsingEncoding(NSUTF8StringEncoding),
-            buffer = NSMutableData(capacity: chunkSize)
-        {
-            self.fileHandle = fileHandle
-            self.delimData = delimData
-            self.buffer = buffer
-        } else {
-            self.fileHandle = nil
-            self.delimData = nil
-            self.buffer = nil
-            return nil
+
+        guard let fileHandle = FileHandle(forReadingAtPath: path),
+            let delimData = delimiter.data(using: String.Encoding.utf8),
+            let buffer = NSMutableData(capacity: chunkSize) else {
+                return nil
         }
+
+        self.fileHandle = fileHandle
+        self.delimData = delimData
+        self.buffer = buffer
+
     }
-    
+
     deinit {
         self.close()
     }
-    
+
     /// Return next line, or nil on EOF.
     func nextLine() -> String? {
-        precondition(fileHandle != nil, "Attempt to read from closed file")
-        
+
         if atEof {
             return nil
         }
-        
+
         // Read data chunks from file until a line delimiter is found:
-        var range = buffer.rangeOfData(delimData, options: [], range: NSMakeRange(0, buffer.length))
+        var range = buffer.range(of: delimData, options: [], in: NSMakeRange(0, buffer.length))
         while range.location == NSNotFound {
-            let tmpData = fileHandle.readDataOfLength(chunkSize)
-            if tmpData.length == 0 {
+            let tmpData = fileHandle.readData(ofLength: chunkSize)
+            if tmpData.count == 0 {
                 // EOF or read error.
                 atEof = true
                 if buffer.length > 0 {
                     // Buffer contains last line in file (not terminated by delimiter).
-                    let line = NSString(data: buffer, encoding: encoding)
-                    
+                    let line = NSString(data: buffer as Data, encoding: encoding.rawValue)
+
                     buffer.length = 0
                     return line as String?
                 }
                 // No more lines.
                 return nil
             }
-            buffer.appendData(tmpData)
-            range = buffer.rangeOfData(delimData, options: [], range: NSMakeRange(0, buffer.length))
+            buffer.append(tmpData)
+            range = buffer.range(of: delimData, options: [], in: NSMakeRange(0, buffer.length))
         }
-        
+
         // Convert complete line (excluding the delimiter) to a string:
-        let line = NSString(data: buffer.subdataWithRange(NSMakeRange(0, range.location)),
-            encoding: encoding)
+        let line = NSString(data: buffer.subdata(with: NSMakeRange(0, range.location)),
+            encoding: encoding.rawValue)
         // Remove line (and the delimiter) from the buffer:
-        buffer.replaceBytesInRange(NSMakeRange(0, range.location + range.length), withBytes: nil, length: 0)
-        
+        buffer.replaceBytes(in: NSMakeRange(0, range.location + range.length), withBytes: nil, length: 0)
+
         return line as String?
     }
-    
+
     /// Start reading from the beginning of file.
     func rewind() -> Void {
-        fileHandle.seekToFileOffset(0)
+        fileHandle.seek(toFileOffset: 0)
         buffer.length = 0
         atEof = false
     }
-    
+
     /// Close the underlying file. No reading must be done after calling this method.
     func close() -> Void {
-        fileHandle?.closeFile()
-        fileHandle = nil
+        fileHandle.closeFile()
     }
 }
 
-extension StreamReader : SequenceType {
-    func generate() -> AnyGenerator<String> {
-        return anyGenerator{
+extension StreamReader : Sequence {
+    func makeIterator() -> AnyIterator<String> {
+        return AnyIterator{
             return self.nextLine()
         }
     }
 }
 
 extension String {
-    func substringsMatchingPattern(let pattern: String, let options: NSRegularExpressionOptions, let matchGroup: Int) throws -> [String] {
+    func substringsMatchingPattern(_ pattern: String, options: NSRegularExpression.Options, matchGroup: Int) throws -> [String] {
         let range = NSMakeRange(0, (self as NSString).length)
         let regex = try NSRegularExpression(pattern: pattern, options: options)
-        let matches = regex.matchesInString(self, options: [], range: range)
-        
+        let matches = regex.matches(in: self, options: [], range: range)
+
         var output: [String] = []
 
         for match in matches  {
-            let matchRange = match.rangeAtIndex(matchGroup)
-            let matchString = (self as NSString).substringWithRange(matchRange)
+            let matchRange = match.rangeAt(matchGroup)
+            let matchString = (self as NSString).substring(with: matchRange)
             output.append(matchString as String)
         }
-        
+
         return output
     }
-    
-    func matchesPattern(let pattern: String, let options: NSRegularExpressionOptions) throws -> Bool {
+
+    func matchesPattern(_ pattern: String, options: NSRegularExpression.Options) throws -> Bool {
         let range = NSMakeRange(0, (self as NSString).length)
         let regex = try NSRegularExpression(pattern: pattern, options: options)
-        let matches = regex.firstMatchInString(self, options: [], range: range)
-        
+        let matches = regex.firstMatch(in: self, options: [], range: range)
+
         if matches == nil {
             return false
         } else {
             return true
         }
     }
-    
-    func subrangesMatchingPattern(let pattern: String, let options: NSRegularExpressionOptions) throws -> [NSRange] {
+
+    func subrangesMatchingPattern(_ pattern: String, options: NSRegularExpression.Options) throws -> [NSRange] {
         let range = NSMakeRange(0, (self as NSString).length)
         let regex = try NSRegularExpression(pattern: pattern, options: options)
-        let matches = regex.matchesInString(self, options: [], range: range)
-        return matches.map { return $0.rangeAtIndex(0) }
+        let matches = regex.matches(in: self, options: [], range: range)
+        return matches.map { return $0.rangeAt(0) }
+    }
+
+   func strip(from char:Character) -> String {
+        let c = self.characters
+        if let ix = c.index(of: char) {
+            return String(c.prefix(upTo: ix))
+        }
+        return ""
     }
 }
 
 struct Playdown {
-    let streamReader: StreamReader!
+
+    var streamReaders: [(reader: StreamReader, name: String)] = []
+    var playgroundDirectory = ""
     let SingleLineTextBeginningPattern = "^//:"
     let MultilineTextBeginningPattern = "/\\*:"
     let MultilineTextEndingPattern = "\\*/"
@@ -147,44 +152,108 @@ struct Playdown {
     let MarkdownCodeEndDelimiter = "```\n"
 
     enum LineType {
-        case SingleLineText, MultilineText, SwiftCode
+        case singleLineText, multilineText, swiftCode
     }
-    
+
     init(filename: String) {
-        streamReader = StreamReader(path: filename)
+
+        let fileManager = FileManager.default
+        let path =  fileManager.currentDirectoryPath + "/" + filename + "/Pages/"
+        let playgroundPath = filename.strip(from: ".")
+        playgroundDirectory =  playgroundPath.strip(from: "/")
+
+        if let pathUrl = URL(string: path) {
+
+            if fileManager.fileExists(atPath: path) {
+                do {
+
+                    let directoryContents = try fileManager.contentsOfDirectory(at: pathUrl, includingPropertiesForKeys: nil, options: [])
+
+                    for element in directoryContents {
+
+                        if let pageName = element.pathComponents.last?.strip(from: ".") {
+
+                            if let streamReader = StreamReader(path: "\(filename)/Pages/\(pageName).xcplaygroundpage/Contents.swift") {
+
+                                streamReaders.append((reader: streamReader, name: pageName))
+                            }
+                        }
+                    }
+
+                } catch {
+                    print(error)
+                }
+            }
+            else {
+
+                //Handle case for single playground page or single swift file
+                var streamPath = filename
+                let playgroundName = playgroundPath.replacingOccurrences(of: playgroundDirectory + "/", with: "")
+
+                if let playPathURL = URL(string: filename), playPathURL.pathExtension != "swift" {
+
+                    streamPath += "/Contents.swift"
+                }
+
+                if let streamReader = StreamReader(path: streamPath) {
+
+                    streamReaders.append((reader: streamReader, name: playgroundName))
+                }
+
+            }
+
+        }
     }
-    
+
     func markdown() throws {
-        var lineState: LineType = .SwiftCode
+
+        for streamReader in streamReaders {
+
+            do {
+                try self.markdown(streamReader: streamReader)
+            } catch {
+                print(error)
+            }
+        }
+
+    }
+
+    func markdown(streamReader: (reader: StreamReader, name: String)) throws {
+        var lineState: LineType = .swiftCode
         var previousLineState: LineType? = nil
-        
-        let options = NSRegularExpressionOptions.AllowCommentsAndWhitespace
-        
-        for line in streamReader {
+        let options = NSRegularExpression.Options.allowCommentsAndWhitespace
+        var fileText: String = ""
+
+        for line in streamReader.reader {
+
             let singleLineBeginning = try line.matchesPattern(SingleLineTextBeginningPattern, options: options)
             let multiLineBeginning = try line.matchesPattern(MultilineTextBeginningPattern, options: options)
             let multiLineEnding = try line.matchesPattern(MultilineTextEndingPattern, options: options)
-            
+
             // Switch into a regular-text line if necessary
             if singleLineBeginning  {
-                lineState = .SingleLineText
+                lineState = .singleLineText
             } else if multiLineBeginning {
-                lineState = .MultilineText
-            } else if lineState == .MultilineText {
-                lineState = .MultilineText
+                lineState = .multilineText
+            } else if lineState == .multilineText {
+                lineState = .multilineText
             } else {
-                lineState = .SwiftCode
+                if line.isEmpty && previousLineState != .swiftCode {
+                    lineState = .singleLineText
+                } else {
+                    lineState = .swiftCode
+                }
             }
-            
-            let outputText: String!
-            
+
+            var outputText: String = ""
+
             if previousLineState == nil {
                 // This is the first line
-                
+
                 switch lineState {
-                case .SingleLineText:
+                case .singleLineText:
                     outputText = stringByStrippingSingleLineTextMetacharactersFromString(line)
-                case .MultilineText:
+                case .multilineText:
                     // The first line of a multiline comment is never displayed (it's an optional comment)
                     outputText = "" // stringByStrippingSingleLineTextMetacharactersFromString(line)
                 default:
@@ -197,70 +266,80 @@ struct Playdown {
             } else {
                 // This is a regular line
                 // Old state -> Current state
-                
+
                 switch (previousLineState!, lineState) {
                 // Swift code -> Other
-                case (.SwiftCode, .SwiftCode):
+                case (.swiftCode, .swiftCode):
                     outputText = line
-                case (.SwiftCode, .SingleLineText):
+                case (.swiftCode, .singleLineText):
                     outputText = MarkdownCodeEndDelimiter + stringByStrippingSingleLineTextMetacharactersFromString(line)
-                case (.SwiftCode, .MultilineText):
+                case (.swiftCode, .multilineText):
                     // The first line of a multiline comment is never displayed (it's an optional comment)
                     outputText = MarkdownCodeEndDelimiter + "" // stringByStrippingMultilineTextMetacharactersFromString(line)
-                
+
                 // Single line -> Other
-                case (.SingleLineText, .SwiftCode):
+                case (.singleLineText, .swiftCode):
                     outputText = try stringByAlteringCodeFencing(line)
-                case (.SingleLineText, .SingleLineText):
+                case (.singleLineText, .singleLineText):
                     outputText = stringByStrippingSingleLineTextMetacharactersFromString(line)
-                case (.SingleLineText, .MultilineText):
+                case (.singleLineText, .multilineText):
                     // The first line of a multiline comment is never displayed (it's an optional comment)
                     outputText = "" // stringByStrippingMultilineTextMetacharactersFromString(line)
-                    
+
                 // Multiline -> Other
-                case (.MultilineText, .SwiftCode):
+                case (.multilineText, .swiftCode):
                     outputText = try stringByAlteringCodeFencing(line)
-                case (.MultilineText, .SingleLineText):
+                case (.multilineText, .singleLineText):
                     outputText = stringByStrippingSingleLineTextMetacharactersFromString(line)
-                case (.MultilineText, .MultilineText):
+                case (.multilineText, .multilineText):
                     outputText = stringByStrippingMultilineTextMetacharactersFromString(line)
                 }
-                
+
             }
-            
-            print(outputText)
-            
+
+            fileText += "\n\(outputText)"
+
             previousLineState = lineState
-            
+
             // Handle switching out of modes
             if multiLineEnding {
                 // Only handle multi-line ending if we were previously in multiline mode
-                if let previous = previousLineState where previous == .MultilineText {
-                    previousLineState = .MultilineText
-                    lineState = .SwiftCode
+                if let previous = previousLineState , previous == .multilineText {
+                    previousLineState = .multilineText
+                    lineState = .swiftCode
                 }
             }
         }
-        
+
         // Handle the closing tags
-        if lineState == .SwiftCode && previousLineState == .SwiftCode {
-            print(MarkdownCodeEndDelimiter)
+        if lineState == .swiftCode && previousLineState == .swiftCode {
+            fileText += "\n\(MarkdownCodeEndDelimiter)"
+        }
+
+        let markdownName = "/\(streamReader.name).markdown"
+        let fileManager = FileManager.default
+        let path = fileManager.currentDirectoryPath + "/" + playgroundDirectory + "/" + markdownName
+
+        do {
+            try fileText.write(toFile: path, atomically: true, encoding: String.Encoding.utf8)
+        } catch {
+            print(error)
         }
     }
-    
-    func stringByStrippingSingleLineTextMetacharactersFromString(string: String) -> String {
-        return string.stringByReplacingOccurrencesOfString("//: ", withString: "")
+
+    func stringByStrippingSingleLineTextMetacharactersFromString(_ string: String) -> String {
+        return string.replacingOccurrences(of: "//: ", with: "")
     }
-    
-    func stringByStrippingMultilineTextMetacharactersFromString(string: String) -> String {
-        let strippedLine = string.stringByReplacingOccurrencesOfString("/*:", withString: "")
-                                 .stringByReplacingOccurrencesOfString("*/", withString: "")
+
+    func stringByStrippingMultilineTextMetacharactersFromString(_ string: String) -> String {
+        let strippedLine = string.replacingOccurrences(of: "/*:", with: "")
+                                 .replacingOccurrences(of: "*/", with: "")
         return strippedLine
     }
-    
-    func stringByAlteringCodeFencing(string: String) throws -> String {
+
+    func stringByAlteringCodeFencing(_ string: String) throws -> String {
         let outputText: String
-        
+
         // Add a newline between the markdown delimiter if necessary
         if try string.matchesPattern("\\n", options: []) || (string as NSString).length == 0 {
             // Empty line
@@ -268,25 +347,22 @@ struct Playdown {
         } else {
             outputText = MarkdownCodeStartDelimiter + "\n" + string
         }
-        
+
         return outputText
     }
 }
 
-enum Error: String, ErrorType, CustomStringConvertible {
-    case FilenameRequired = "Filename Required"
-    var description: String {
-        return self.rawValue
-    }
+enum CustomError: Error {
+    case FilenameRequired
 }
 
 struct Main {
     init() throws {
-        if Process.arguments.count < 2 {
-            throw Error.FilenameRequired
+        if CommandLine.arguments.count < 2 {
+            throw CustomError.FilenameRequired
         }
 
-        let filename = Process.arguments[1]
+        let filename = CommandLine.arguments[1]
         let playdown = Playdown(filename: filename)
         try playdown.markdown()
     }
